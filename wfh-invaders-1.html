@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WFH Invaders</title>
+<style>
+  body {
+    background: #0a0a12;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    font-family: 'Courier New', monospace;
+    color: #e8e8e8;
+    margin: 0;
+    padding: 20px;
+  }
+  h1 {
+    color: #4ade80;
+    letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  #subtitle {
+    color: #888;
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+  canvas {
+    background: #0f0f1a;
+    border: 2px solid #4ade80;
+    box-shadow: 0 0 20px rgba(74, 222, 128, 0.3);
+  }
+  #hud {
+    display: flex;
+    justify-content: space-between;
+    width: 600px;
+    margin-top: 10px;
+    font-size: 16px;
+  }
+  #message {
+    margin-top: 14px;
+    font-size: 18px;
+    color: #facc15;
+    height: 24px;
+    text-align: center;
+  }
+  #instructions {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+  }
+  button {
+    margin-top: 10px;
+    background: #4ade80;
+    border: none;
+    padding: 8px 20px;
+    font-family: inherit;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+  <h1>🏠 WFH INVADERS 🏠</h1>
+  <div id="subtitle">Defend the office. The houses are coming back.</div>
+  <canvas id="game" width="600" height="500"></canvas>
+  <div id="hud">
+    <span id="score">Score: 0</span>
+    <span id="lives">Lives: 3</span>
+    <span id="level">Wave: 1</span>
+  </div>
+  <div id="message"></div>
+  <div id="winMessage" style="display:none; max-width:560px; text-align:center; color:#4ade80; font-size:16px; margin-top:10px; line-height:1.5;"></div>
+  <div id="instructions">← → move · SPACE shoot · Keep the houses from reaching the office floor</div>
+  <button id="restartBtn" style="display:none;">Restart</button>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+let score = 0, lives = 3, wave = 1;
+let gameOver = false, won = false;
+let keys = {};
+
+const player = { x: W/2 - 20, y: H - 40, w: 40, h: 18, speed: 5 };
+let bullets = [];
+let enemyBullets = [];
+let houses = [];
+let enemySpeed = 1;
+let enemyDir = 1;
+
+function spawnHouses() {
+  houses = [];
+  const rows = 4, cols = 7;
+  const spacingX = 60, spacingY = 50;
+  const startX = 60, startY = 50;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      houses.push({
+        x: startX + c * spacingX,
+        y: startY + r * spacingY,
+        w: 36, h: 28,
+        alive: true
+      });
+    }
+  }
+  enemySpeed = 1 + (wave - 1) * 0.4;
+}
+
+spawnHouses();
+
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') e.preventDefault();
+});
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+let lastShot = 0;
+function update(time) {
+  if (gameOver) return;
+
+  // player movement
+  if (keys['ArrowLeft']) player.x -= player.speed;
+  if (keys['ArrowRight']) player.x += player.speed;
+  player.x = Math.max(0, Math.min(W - player.w, player.x));
+
+  // shooting
+  if (keys['Space'] && time - lastShot > 350) {
+    bullets.push({ x: player.x + player.w/2 - 2, y: player.y, w: 4, h: 10 });
+    lastShot = time;
+  }
+
+  // move bullets
+  bullets.forEach(b => b.y -= 7);
+  bullets = bullets.filter(b => b.y > -10);
+
+  enemyBullets.forEach(b => b.y += 4);
+  enemyBullets = enemyBullets.filter(b => b.y < H + 10);
+
+  // move houses (swarm)
+  let aliveHouses = houses.filter(h => h.alive);
+  let hitEdge = false;
+  aliveHouses.forEach(h => {
+    h.x += enemySpeed * enemyDir;
+    if (h.x <= 0 || h.x + h.w >= W) hitEdge = true;
+  });
+  if (hitEdge) {
+    enemyDir *= -1;
+    aliveHouses.forEach(h => h.y += 18);
+  }
+
+  // random enemy shooting
+  if (Math.random() < 0.02 + wave * 0.003 && aliveHouses.length > 0) {
+    const shooter = aliveHouses[Math.floor(Math.random() * aliveHouses.length)];
+    enemyBullets.push({ x: shooter.x + shooter.w/2 - 2, y: shooter.y + shooter.h, w: 4, h: 10 });
+  }
+
+  // collisions: player bullets vs houses
+  bullets.forEach(b => {
+    houses.forEach(h => {
+      if (h.alive &&
+          b.x < h.x + h.w && b.x + b.w > h.x &&
+          b.y < h.y + h.h && b.y + b.h > h.y) {
+        h.alive = false;
+        b.y = -100;
+        score += 10;
+      }
+    });
+  });
+
+  // collisions: enemy bullets vs player
+  enemyBullets.forEach(b => {
+    if (b.x < player.x + player.w && b.x + b.w > player.x &&
+        b.y < player.y + player.h && b.y + b.h > player.y) {
+      b.y = H + 100;
+      lives--;
+      if (lives <= 0) {
+        gameOver = true;
+        won = false;
+      }
+    }
+  });
+
+  // houses reach the bottom = office invaded
+  aliveHouses.forEach(h => {
+    if (h.y + h.h >= player.y) {
+      gameOver = true;
+      won = false;
+    }
+  });
+
+  // all houses cleared — victory
+  if (aliveHouses.length === 0 && !gameOver && !won) {
+    won = true;
+    gameOver = true;
+  }
+
+  document.getElementById('score').textContent = 'Score: ' + score;
+  document.getElementById('lives').textContent = 'Lives: ' + lives;
+  document.getElementById('level').textContent = 'Wave: ' + wave;
+}
+
+function drawHouse(h) {
+  ctx.fillStyle = '#f87171';
+  // roof
+  ctx.beginPath();
+  ctx.moveTo(h.x, h.y + h.h * 0.4);
+  ctx.lineTo(h.x + h.w/2, h.y);
+  ctx.lineTo(h.x + h.w, h.y + h.h * 0.4);
+  ctx.closePath();
+  ctx.fill();
+  // body
+  ctx.fillStyle = '#fca5a5';
+  ctx.fillRect(h.x + 4, h.y + h.h * 0.4, h.w - 8, h.h * 0.6);
+  // door
+  ctx.fillStyle = '#7f1d1d';
+  ctx.fillRect(h.x + h.w/2 - 4, h.y + h.h * 0.7, 8, h.h * 0.3);
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // stars background
+  ctx.fillStyle = '#1a1a2e';
+  for (let i = 0; i < 40; i++) {
+    ctx.fillRect((i * 97) % W, (i * 53) % H, 1, 1);
+  }
+
+  // player ship — stylised "TRIUMPH" wordmark badge
+  const cx = player.x + player.w / 2;
+  ctx.save();
+  ctx.fillStyle = '#4ade80';
+  // badge/shield backing (roughly logo-shaped: wide flattened hexagon)
+  ctx.beginPath();
+  ctx.moveTo(player.x, player.y + player.h * 0.3);
+  ctx.lineTo(player.x + 8, player.y);
+  ctx.lineTo(player.x + player.w - 8, player.y);
+  ctx.lineTo(player.x + player.w, player.y + player.h * 0.3);
+  ctx.lineTo(player.x + player.w - 6, player.y + player.h);
+  ctx.lineTo(player.x + 6, player.y + player.h);
+  ctx.closePath();
+  ctx.fill();
+  // wordmark
+  ctx.fillStyle = '#0f0f1a';
+  ctx.font = 'bold 10px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('TRIUMPH', cx, player.y + player.h / 2 + 4);
+  ctx.restore();
+
+  // bullets — player fires "BS"
+  ctx.fillStyle = '#4ade80';
+  ctx.font = 'bold 12px Courier New';
+  ctx.textAlign = 'center';
+  bullets.forEach(b => ctx.fillText('BS', b.x + b.w/2, b.y + 10));
+
+  ctx.fillStyle = '#f87171';
+  enemyBullets.forEach(b => ctx.fillRect(b.x, b.y, b.w, b.h));
+
+  // houses
+  houses.forEach(h => { if (h.alive) drawHouse(h); });
+
+  const msg = document.getElementById('message');
+  const winMsg = document.getElementById('winMessage');
+  const btn = document.getElementById('restartBtn');
+  if (gameOver && won) {
+    msg.textContent = 'Final score: ' + score;
+    winMsg.style.display = 'block';
+    winMsg.innerHTML = 'Congratulations!<br><br>Thanks to you, in-office collaboration is preserved. A handshake is available upon request.<br><br>You can now safely return to your desk and put your ANC headphones on.<br><br>Next meeting at 3:30pm, on Teams.';
+    btn.style.display = 'inline-block';
+  } else if (gameOver) {
+    msg.textContent = 'GAME OVER — The houses have taken the office. Final score: ' + score;
+    winMsg.style.display = 'none';
+    btn.style.display = 'inline-block';
+  } else {
+    msg.textContent = '';
+    winMsg.style.display = 'none';
+    btn.style.display = 'none';
+  }
+}
+
+function loop(time) {
+  update(time);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+document.getElementById('restartBtn').addEventListener('click', () => {
+  score = 0; lives = 3; wave = 1; gameOver = false; won = false;
+  bullets = []; enemyBullets = [];
+  spawnHouses();
+});
+</script>
+</body>
+</html>
